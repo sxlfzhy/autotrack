@@ -16,197 +16,189 @@
 
 
 var assert = require('assert');
+var uuid = require('uuid');
 var ga = require('./analytics');
+var utilities = require('./utilities');
 var constants = require('../lib/constants');
+var pkg = require('../package.json');
 
 
-var browserCaps;
+var testId;
+var log;
 var baseUrl = browser.options.baseUrl;
 
 
 describe('urlTracker', function() {
+  this.retries(4);
 
-  before(function *() {
-    browserCaps = (yield browser.session()).value;
-
-    yield browser.url('/test/url-change-tracker.html');
+  before(function() {
+    browser.url('/test/url-change-tracker.html');
   });
-
 
   beforeEach(function() {
-    return browser
-        .execute(ga.run, 'create', 'UA-XXXXX-Y', 'auto')
-        .execute(ga.trackHitData);
-  });
+    testId = uuid();
+    log = utilities.bindLogAccessors(testId);
 
+    browser.execute(ga.run, 'create', 'UA-XXXXX-Y', 'auto');
+    browser.execute(ga.logHitData, testId);
+  });
 
   afterEach(function () {
-    return browser
-        .execute(ga.clearHitData)
-        .execute(ga.run, 'urlChangeTracker:remove')
-        .execute(ga.run, 'remove');
+    browser.execute(ga.run, 'urlChangeTracker:remove');
+    browser.execute(ga.run, 'remove');
+    log.removeHits();
   });
 
+  it('captures URL changes via pushState and popstate', function() {
+    browser.execute(ga.run, 'require', 'urlChangeTracker');
 
-  it('should capture URL changes via pushState and popstate', function *() {
+    browser.click('#foo');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
 
-    if (notSupportedInBrowser()) return;
+    browser.click('#bar');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/bar.html');
 
-    yield browser.execute(ga.run, 'require', 'urlChangeTracker');
+    browser.click('#qux');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/qux.html');
 
-    var fooUrl = (yield browser
-        .click('#foo')
-        .url())
-        .value;
+    browser.back();
+    assert.strictEqual(browser.url().value, baseUrl + '/test/bar.html');
 
-    assert.equal(fooUrl, baseUrl + '/test/foo.html');
+    browser.back();
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
 
-    var barUrl = (yield browser
-        .click('#bar')
-        .url())
-        .value;
+    browser.back();
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html');
 
-    assert.equal(barUrl, baseUrl + '/test/bar.html');
+    browser.waitUntil(log.hitCountEquals(6));
 
-    var quxUrl = (yield browser
-        .click('#qux')
-        .url())
-        .value;
-
-    assert.equal(quxUrl, baseUrl + '/test/qux.html');
-
-    var back1Url = (yield browser
-        .back()
-        .url())
-        .value;
-
-    assert.equal(back1Url, baseUrl + '/test/bar.html');
-
-    var back2Url = (yield browser
-        .back()
-        .url())
-        .value;
-
-    assert.equal(back2Url, baseUrl + '/test/foo.html');
-
-    var back3Url = (yield browser
-        .back()
-        .url())
-        .value;
-
-    assert.equal(back3Url, baseUrl + '/test/url-change-tracker.html');
-
-    var hitData = (yield browser
-        .execute(ga.getHitData))
-        .value;
-
-    assert.equal(hitData[0].page, '/test/foo.html');
-    assert.equal(hitData[0].title, 'Foo');
-    assert.equal(hitData[1].page, '/test/bar.html');
-    assert.equal(hitData[1].title, 'Bar');
-    assert.equal(hitData[2].page, '/test/qux.html');
-    assert.equal(hitData[2].title, 'Qux');
-    assert.equal(hitData[3].page, '/test/bar.html');
-    assert.equal(hitData[3].title, 'Bar');
-    assert.equal(hitData[4].page, '/test/foo.html');
-    assert.equal(hitData[4].title, 'Foo');
-    assert.equal(hitData[5].page, '/test/url-change-tracker.html');
-    assert.equal(hitData[5].title, 'Home');
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].dp, '/test/foo.html');
+    assert.strictEqual(hits[0].dt, 'Foo');
+    assert.strictEqual(hits[1].dp, '/test/bar.html');
+    assert.strictEqual(hits[1].dt, 'Bar');
+    assert.strictEqual(hits[2].dp, '/test/qux.html');
+    assert.strictEqual(hits[2].dt, 'Qux');
+    assert.strictEqual(hits[3].dp, '/test/bar.html');
+    assert.strictEqual(hits[3].dt, 'Bar');
+    assert.strictEqual(hits[4].dp, '/test/foo.html');
+    assert.strictEqual(hits[4].dt, 'Foo');
+    assert.strictEqual(hits[5].dp, '/test/url-change-tracker.html');
+    assert.strictEqual(hits[5].dt, 'Home');
   });
 
-  it('should update the tracker but not send hits when using replaceState',
-      function *() {
+  it('updates the tracker but does not send hits when using replaceState',
+      function() {
+    browser.execute(ga.run, 'require', 'urlChangeTracker');
 
-    if (notSupportedInBrowser()) return;
+    browser.click('#replace');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/replaced.html');
+    browser.execute(ga.run, 'send', 'data');
+    browser.waitUntil(log.hitCountEquals(1));
 
-    yield browser.execute(ga.run, 'require', 'urlChangeTracker');
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].dp, '/test/replaced.html');
+    assert.notStrictEqual(hits[0].t, 'pageview');
 
-    var url = (yield browser
-        .click('#replace')
-        .url())
-        .value;
-
-    // Replace state was called to just use the pathname value.
-    assert.equal(url, baseUrl + '/test/replaced.html');
-
-    var url = (yield browser
-        .click('#restore')
-        .url())
-        .value;
-
-    // Replace state was called to just use the pathname value.
-    assert.equal(url, baseUrl + '/test/url-change-tracker.html');
-
-    var hitData = (yield browser
-        .execute(ga.getHitData))
-        .value;
-
-    assert.equal(hitData.length, 0);
+    browser.click('#restore');
   });
 
+  it('does not capture hash changes', function() {
+    browser.execute(ga.run, 'require', 'urlChangeTracker');
 
-  it('should not capture hash changes', function *() {
+    browser.click('#hash');
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html#hash');
 
-    if (notSupportedInBrowser()) return;
+    browser.back();
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html');
 
-    yield browser.execute(ga.run, 'require', 'urlChangeTracker');
-
-    var url = (yield browser
-        .click('#hash')
-        .url())
-        .value;
-
-    assert.equal(url, baseUrl + '/test/url-change-tracker.html#hash');
-
-    var backUrl = (yield browser
-        .back()
-        .url())
-        .value;
-
-    assert.equal(backUrl, baseUrl + '/test/url-change-tracker.html');
-
-    var hitData = (yield browser
-        .execute(ga.getHitData))
-        .value;
-
-    assert.equal(hitData.length, 0);
+    log.assertNoHitsReceived();
   });
 
+  it('supports customizing what is considered a change', function() {
+    browser.execute(requireUrlChangeTrackerTracker_shouldTrackUrlChange);
 
-  it('should support customizing what is considered a change', function *() {
+    browser.click('#foo');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
 
-    if (notSupportedInBrowser()) return;
+    browser.click('#bar');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/bar.html');
 
-    yield browser.execute(requireUrlChangeTrackerTrackerWithConditional);
+    browser.back();
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
 
-    var fooUrl = (yield browser
-        .click('#foo')
-        .url())
-        .value;
+    browser.back();
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html');
 
-    assert.equal(fooUrl, baseUrl + '/test/foo.html');
+    browser.waitUntil(log.hitCountEquals(2));
 
-    var backUrl = (yield browser
-       .back()
-       .url())
-       .value;
-
-    assert.equal(backUrl, baseUrl + '/test/url-change-tracker.html');
-
-    var hitData = (yield browser
-       .execute(ga.getHitData))
-       .value;
-
-    assert.equal(hitData.length, 0);
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].dp, '/test/foo.html');
+    assert.strictEqual(hits[0].dt, 'Foo');
+    assert.strictEqual(hits[1].dp, '/test/url-change-tracker.html');
+    assert.strictEqual(hits[1].dt, 'Home');
   });
 
+  it('supports customizing any field via the fieldsObj', function() {
+    browser.execute(ga.run, 'require', 'urlChangeTracker', {
+      fieldsObj: {
+        dimension1: 'urlChangeTracker'
+      }
+    });
 
-  it('should include the &did param with all hits', function() {
+    browser.click('#foo');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
 
-    return browser
-        .execute(ga.run, 'require', 'urlChangeTracker')
-        .execute(ga.run, 'send', 'pageview')
-        .waitUntil(ga.hitDataMatches([['[0].devId', constants.DEV_ID]]));
+    browser.back();
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html');
+
+    browser.waitUntil(log.hitCountEquals(2));
+
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].dp, '/test/foo.html');
+    assert.strictEqual(hits[0].dt, 'Foo');
+    assert.strictEqual(hits[0].cd1, 'urlChangeTracker');
+    assert.strictEqual(hits[1].dp, '/test/url-change-tracker.html');
+    assert.strictEqual(hits[1].dt, 'Home');
+    assert.strictEqual(hits[1].cd1, 'urlChangeTracker');
+  });
+
+  it('supports specifying a hit filter', function() {
+
+
+    browser.execute(requireUrlChangeTrackerTracker_hitFilter);
+
+    browser.click('#foo');
+    assert.strictEqual(browser.url().value, baseUrl + '/test/foo.html');
+
+    browser.back();
+    assert.strictEqual(browser.url().value,
+        baseUrl + '/test/url-change-tracker.html');
+
+    browser.waitUntil(log.hitCountEquals(1));
+
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].dp, '/test/url-change-tracker.html');
+    assert.strictEqual(hits[0].dt, 'Home');
+    assert.strictEqual(hits[0].cd1, 'urlChangeTracker');
+  });
+
+  it('includes usage params with all hits', function() {
+    browser.execute(ga.run, 'require', 'urlChangeTracker');
+    browser.execute(ga.run, 'send', 'pageview');
+    browser.waitUntil(log.hitCountEquals(1));
+
+    var hits = log.getHits();
+    assert.strictEqual(hits[0].did, constants.DEV_ID);
+    assert.strictEqual(hits[0][constants.VERSION_PARAM], pkg.version);
+
+    // '100' = '100000000' in hex
+    assert.strictEqual(hits[0][constants.USAGE_PARAM], '100');
   });
 
 });
@@ -217,22 +209,30 @@ describe('urlTracker', function() {
  * client, this one-off function must be used to set the value for
  * `shouldTrackOutboundForm`.
  */
-function requireUrlChangeTrackerTrackerWithConditional() {
+function requireUrlChangeTrackerTracker_shouldTrackUrlChange() {
   ga('require', 'urlChangeTracker', {
-    shouldTrackUrlChange: function(newPath, oldPath) {
-      return false;
+    shouldTrackUrlChange: function(newPath) {
+      return newPath.indexOf('bar') < 0;
     }
   });
 }
 
 
-function isIE9() {
-  return browserCaps.browserName == 'internet explorer' &&
-         browserCaps.version == '9';
-}
-
-
-function notSupportedInBrowser() {
-  // IE9 doesn't support the HTML5 History API.
-  return isIE9();
+/**
+ * Since function objects can't be passed via parameters from server to
+ * client, this one-off function must be used to set the value for
+ * `hitFilter`.
+ */
+function requireUrlChangeTrackerTracker_hitFilter() {
+  ga('require', 'urlChangeTracker', {
+    hitFilter: function(model) {
+      var title = model.get('title');
+      if (title == 'Foo') {
+        throw 'Exclude Foo pages';
+      }
+      else {
+        model.set('dimension1', 'urlChangeTracker', true);
+      }
+    }
+  });
 }

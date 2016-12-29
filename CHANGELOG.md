@@ -1,5 +1,50 @@
 # Changelog
 
+This document lists the changes between each minor and patch versions. For changes between major versions, see the [Upgrade Reference](/docs/upgrading.md)
+
+## Master (unreleased)
+
+- Update outboundLinkTracker to not use target="_blank" ever
+- Fix the in-code version not being automatically updated
+- Fix cleanUrlTracker updating `page` on the tracker not just the hit
+- Fix outboundFormTracker `formSelector` option not being applied
+
+## 1.1.0 (2016-10-18)
+
+- Add impressionTracker methods to observe and unobserve elements (#111)
+
+### 1.0.4 (2016-10-15)
+
+- Prevent the withTimeout callback from firing twice
+
+### 1.0.3 (2016-09-18)
+
+- Update dom-utils for better shadow DOM support
+
+### 1.0.2 (2016-09-18)
+
+- Fix the autotrack warning and upgrade language
+- Update dom-utils for better shadow DOM support
+
+### 1.0.1 (2016-08-10)
+
+- Upgrade dependencies to get third-party fixes
+
+### 1.0.0 (2016-06-30)
+
+- See the [Upgrade Reference](/docs/upgrading.md) for a full list of change.
+
+### 0.6.5 (2016-04-13)
+
+- Fix a history change bug in IE11 (#57)
+
+### 0.6.4 (2016-03-30)
+
+- Ensure only http(s) links are considered outbound (#44)
+- Remove unnecessary caught errors (#42)
+- Move the gaplugin assignment to the provide call (#36)
+- Refactor tests to make fewer full page requests (#35)
+
 ### 0.6.3 (2016-03-15)
 
 - Update the generated license text

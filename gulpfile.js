@@ -15,16 +15,18 @@
  */
 
 
+/* eslint require-jsdoc: "off" */
+
+
 var browserify = require('browserify');
 var buffer = require('vinyl-buffer');
-var connect = require('connect');
+var eslint = require('gulp-eslint');
 var fs = require('fs');
 var gulp = require('gulp');
+var gulpIf = require('gulp-if');
 var gutil = require('gulp-util');
+var sauceConnectLauncher = require('sauce-connect-launcher');
 var seleniumServerJar = require('selenium-server-standalone-jar');
-var pkg = require('./package.json');
-var shell = require('shelljs');
-var serveStatic = require('serve-static');
 var source = require('vinyl-source-stream');
 var sourcemaps = require('gulp-sourcemaps');
 var spawn = require('child_process').spawn;
@@ -32,11 +34,26 @@ var uglify = require('gulp-uglify');
 var webdriver = require('gulp-webdriver');
 
 
-var server;
+var pkg = require('./package.json');
+var server = require('./test/server');
+
+
+var seleniumServer;
+var sshTunnel;
+
+
+process.env.AUTOTRACK_VERSION = process.env.AUTOTRACK_VERSION || pkg.version;
+
+
+/**
+ * @return {boolean} True if NODE_ENV is production.
+ */
+function isProd() {
+  return process.env.NODE_ENV == 'production';
+}
 
 
 gulp.task('javascript', function(done) {
-
   // Gets the license string from this file (the first 15 lines),
   // and adds an @license tag.
   var license = fs.readFileSync(__filename, 'utf-8')
@@ -59,16 +76,29 @@ gulp.task('javascript', function(done) {
   .pipe(source('./autotrack.js'))
   .pipe(buffer())
   .pipe(sourcemaps.init({loadMaps: true}))
-  .pipe(uglify({output: {preamble: license + '\n\n' + version}}))
+  .pipe(gulpIf(isProd(), uglify({
+    output: {preamble: license + '\n\n' + version}
+  })))
   .pipe(sourcemaps.write('./'))
   .pipe(gulp.dest('./'));
 });
 
 
-gulp.task('test', ['javascript', 'serve', 'selenium'], function() {
+gulp.task('lint', function () {
+  return gulp.src(['gulpfile.js', 'lib/**/*.js', 'test/**/*.js'])
+      .pipe(eslint())
+      .pipe(eslint.format())
+      .pipe(eslint.failAfterError());
+});
+
+
+gulp.task('test', ['javascript', 'lint', 'tunnel', 'selenium'], function() {
   function stopServers() {
-    server.close();
-    if (!process.env.CI) seleniumServer.kill();
+    sshTunnel.close();
+    server.stop();
+    if (!process.env.CI) {
+      seleniumServer.kill();
+    }
   }
   return gulp.src('./wdio.conf.js')
       .pipe(webdriver())
@@ -76,8 +106,28 @@ gulp.task('test', ['javascript', 'serve', 'selenium'], function() {
 });
 
 
+gulp.task('tunnel', ['serve'], function(done) {
+  var opts = {
+    username: process.env.SAUCE_USERNAME,
+    accessKey: process.env.SAUCE_ACCESS_KEY,
+    verbose: true,
+  };
+  sauceConnectLauncher(opts, function(err, sauceConnectProcess) {
+    if (err) {
+      done(err);
+    } else {
+      process.env.BASE_URL = 'http://localhost:8080';
+      sshTunnel = sauceConnectProcess;
+      process.on('exit', sshTunnel.close.bind(sshTunnel));
+      done();
+    }
+  });
+});
+
+
 gulp.task('serve', ['javascript'], function(done) {
-  server = connect().use(serveStatic('./')).listen(8080, done);
+  server.start(done);
+  process.on('exit', server.stop.bind(server));
 });
 
 
@@ -91,6 +141,7 @@ gulp.task('selenium', function(done) {
       done();
     }
   });
+  process.on('exit', seleniumServer.kill.bind(seleniumServer));
 });
 
 
